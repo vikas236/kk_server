@@ -337,15 +337,15 @@ app.post("/send-otp", async (req, res) => {
   try {
     const otp = Math.floor(100000 + Math.random() * 900000);
     // Commenting out the actual OTP sending via Fast2SMS for testing purposes
-    // const response = await fetch(
-    //   `${process.env.FAST2SMS_BASE_URL}?authorization=${process.env.FAST2SMS_AUTHORIZATION}&route=otp&variables_values=${otp}&flash=0&numbers=${phoneNumber}`
-    // );
+    const response = await fetch(
+      `${process.env.FAST2SMS_BASE_URL}?authorization=${process.env.FAST2SMS_AUTHORIZATION}&route=otp&variables_values=${otp}&flash=0&numbers=${phoneNumber}`
+    );
 
     // Mocking a successful response for testing
-    const data = {
-      status: "success",
-      verification_id: "mock-verification-id",
-    };
+    // const data = {
+    //   status: "success",
+    //   verification_id: "mock-verification-id",
+    // };
     await storeOtp(phoneNumber, otp);
 
     if (data.status === "success") {
