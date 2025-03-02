@@ -20,7 +20,7 @@ const pool = new Pool({
 });
 
 const corsOptions = {
-  origin: ["http://localhost:5173", "https://www.konaseemakart.in/"],
+  origin: ["http://localhost:5173", "https://www.konaseemakart.in"],
   optionsSuccessStatus: 200,
 };
 
