@@ -20,7 +20,7 @@ const pool = new Pool({
 });
 
 const corsOptions = {
-  origin: "http://localhost:5173",
+  origin: ["http://localhost:5173", "https://www.konaseemakart.in/"],
   optionsSuccessStatus: 200,
 };
 
@@ -336,11 +336,18 @@ app.post("/send-otp", async (req, res) => {
 
   try {
     const otp = Math.floor(100000 + Math.random() * 900000);
-    const response = await fetch(
-      `${process.env.FAST2SMS_BASE_URL}?authorization=${process.env.FAST2SMS_AUTHORIZATION}&route=otp&variables_values=${otp}&flash=0&numbers=${phoneNumber}`
-    );
+    // Commenting out the actual OTP sending via Fast2SMS for testing purposes
+    // const response = await fetch(
+    //   `${process.env.FAST2SMS_BASE_URL}?authorization=${process.env.FAST2SMS_AUTHORIZATION}&route=otp&variables_values=${otp}&flash=0&numbers=${phoneNumber}`
+    // );
 
-    const data = await response.json();
+    // Mocking a successful response for testing
+    const data = {
+      status: "success",
+      verification_id: "mock-verification-id",
+    };
+    await storeOtp(phoneNumber, otp);
+
     if (data.status === "success") {
       res.json({
         message: "OTP sent successfully",
@@ -356,40 +363,72 @@ app.post("/send-otp", async (req, res) => {
 });
 
 app.post("/verify-otp", async (req, res) => {
-  const { phoneNumber, otp, verificationId } = req.body;
-
-  if (!/^\d{10}$/.test(phoneNumber)) {
-    res.status(400).send({ message: "Please enter a valid phone number" });
-    return;
-  }
-
-  if (!/^\d{6}$/.test(otp)) {
-    res.status(400).send({ message: "Please enter a valid OTP" });
-    return;
-  }
+  const { phoneNumber, otp } = req.body;
 
   try {
-    const response = await fetch(
-      `${process.env.FAST2SMS_BASE_URL}?authorization=${process.env.FAST2SMS_AUTHORIZATION}&route=otp&variables_values=${otp}&flash=0&numbers=${phoneNumber}&verification_id=${verificationId}`
-    );
+    // Get stored OTP from database
+    const storedOtp = await getOtp(phoneNumber);
+    console.log(storedOtp);
 
-    const data = await response.json();
-    if (data.status === "success") {
-      res.json({
-        message: "OTP verified successfully",
-      });
+    // Check if OTP exists
+    if (!storedOtp) {
+      return res.status(404).json({ message: "No OTP found for this number" });
+    }
+
+    // Compare submitted OTP with stored OTP
+    if (storedOtp === otp) {
+      await pool.query(
+        "DELETE FROM kk_pending_logins WHERE phone = $1 AND otp = $2",
+        [phoneNumber, otp]
+      );
+
+      return res.status(200).json({ message: "OTP verified successfully" });
     } else {
-      res.status(500).send({ message: data.message });
+      return res.status(400).json({ message: "Incorrect OTP" });
     }
   } catch (error) {
-    console.error("Error: ", error);
-    res.status(500).send({ message: "Error verifying OTP" });
+    console.error("Error verifying OTP:", error);
+    return res.status(500).json({ message: "Error verifying OTP" });
   }
 });
 
 app.post("/echo", async (req, res) => {
   res.json(req.body);
 });
+
+const storeOtp = async (phoneNumber, otp) => {
+  try {
+    await pool.query(
+      `INSERT INTO kk_pending_logins (phone, otp, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (phone) 
+       DO UPDATE SET otp = $2, created_at = NOW();`,
+      [phoneNumber, otp]
+    );
+    console.log(`OTP ${otp} stored for phone: ${phoneNumber}`);
+  } catch (error) {
+    console.error("Error storing OTP:", error);
+    throw new Error("Database error while storing OTP");
+  }
+};
+
+const getOtp = async (phoneNumber) => {
+  try {
+    const result = await pool.query(
+      `SELECT otp FROM kk_pending_logins WHERE phone = $1;`,
+      [phoneNumber]
+    );
+
+    if (result.rows.length > 0) {
+      return result.rows[0].otp; // Return the OTP
+    } else {
+      return null; // No OTP found
+    }
+  } catch (error) {
+    console.error("Error retrieving OTP:", error);
+    throw new Error("Database error while fetching OTP");
+  }
+};
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
