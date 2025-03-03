@@ -282,10 +282,8 @@ app.post("/get_dishes", async (req, res) => {
 
     // Get dish details (including names)
     const dishesResult = await pool.query(
-      `SELECT rcd.menu_item_id, mi.name AS dish_name, rcd.price 
-       FROM restaurant_category_dish rcd
-       JOIN menu_items mi ON rcd.menu_item_id = mi.id
-       WHERE rcd.restaurant_id = $1 AND rcd.category_id = $2`,
+      `SELECT rcd.menu_item_id, mi.name AS dish_name, rcd.price, rcd.image FROM restaurant_category_dish rcd
+      JOIN menu_items mi ON rcd.menu_item_id = mi.id WHERE rcd.restaurant_id = $1 AND rcd.category_id = $2;`,
       [restaurant_id, category_id]
     );
 
@@ -394,6 +392,61 @@ app.post("/verify-otp", async (req, res) => {
 
 app.post("/echo", async (req, res) => {
   res.json(req.body);
+});
+
+app.post("/add_dishimage", async (req, res) => {
+  const { restaurant_name, category_name, dish_name, base64 } = req.body;
+
+  try {
+    // Query to find the correct row in restaurant_category_dish
+    const dishQuery = `
+      SELECT rcd.restaurant_id, r.name AS restaurant_name,
+             rcd.category_id, c.name AS category_name,
+             rcd.menu_item_id, mi.name AS menu_item_name,
+             rcd.price, rcd.image
+      FROM restaurant_category_dish rcd
+      JOIN restaurants r ON rcd.restaurant_id = r.id
+      JOIN categories c ON rcd.category_id = c.id
+      JOIN menu_items mi ON rcd.menu_item_id = mi.id
+      WHERE r.name ~* $1 
+        AND c.name ~* $2 
+        AND mi.name ~* $3;
+    `;
+
+    const dishResult = await pool.query(dishQuery, [
+      restaurant_name,
+      category_name,
+      dish_name,
+    ]);
+
+    // If no matching row is found
+    if (dishResult.rows.length === 0) {
+      return res.status(404).json({ message: "No matching dish found" });
+    }
+
+    // Extract the restaurant_id, category_id, and menu_item_id
+    const { restaurant_id, category_id, menu_item_id } = dishResult.rows[0];
+
+    // Update query to set the image column
+    const updateQuery = `
+      UPDATE restaurant_category_dish
+      SET image = $4
+      WHERE restaurant_id = $1 AND category_id = $2 AND menu_item_id = $3
+      RETURNING *;
+    `;
+
+    const updateResult = await pool.query(updateQuery, [
+      restaurant_id,
+      category_id,
+      menu_item_id,
+      base64,
+    ]);
+
+    res.json({ message: "image added successfully" });
+  } catch (err) {
+    console.error("Error: ", err);
+    res.status(500).send({ message: "Error updating image" });
+  }
 });
 
 const storeOtp = async (phoneNumber, otp) => {
