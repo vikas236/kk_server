@@ -573,9 +573,122 @@ app.post("/update_dishprice", async (req, res) => {
   }
 });
 
-app.post("/add_newdish", (req, res) => {
-  console.log("Received parameters:", req.body);
-  res.status(200).send("Empty POST request received");
+app.post("/add_new_dish", async (req, res) => {
+  const { restaurant_name, category_name, dish_name } = req.body;
+  if (!restaurant_name || !category_name || !dish_name)
+    return res.status(400).json({ error: "Missing required fields" });
+
+  try {
+    // Find restaurant_id and category_id (do not create)
+    const query = `
+      SELECT r.id AS restaurant_id, c.id AS category_id
+      FROM restaurants r, categories c
+      WHERE r.name ILIKE $1 AND c.name ILIKE $2
+    `;
+    const result = await pool.query(query, [restaurant_name, category_name]);
+
+    if (result.rows.length === 0) {
+      pool.release();
+      return res
+        .status(404)
+        .json({ error: "Restaurant or Category not found" });
+    }
+
+    const { restaurant_id, category_id } = result.rows[0];
+
+    // Find or create menu_item_id
+    let dishResult = await pool.query(
+      "SELECT id FROM menu_items WHERE name ILIKE $1",
+      [dish_name]
+    );
+
+    let menu_item_id;
+    if (dishResult.rows.length > 0) {
+      menu_item_id = dishResult.rows[0].id;
+    } else {
+      const insertDish = await pool.query(
+        "INSERT INTO menu_items (name) VALUES ($1) RETURNING id",
+        [dish_name]
+      );
+      menu_item_id = insertDish.rows[0].id;
+    }
+
+    // Insert into restaurant_category_dish (if not exists)
+    const insertResult = await pool.query(
+      `INSERT INTO restaurant_category_dish (restaurant_id, category_id, menu_item_id, price, image)
+       VALUES ($1, $2, $3, 0, NULL)
+       ON CONFLICT (restaurant_id, category_id, menu_item_id) DO NOTHING`,
+      [restaurant_id, category_id, menu_item_id]
+    );
+
+    if (insertResult.rowCount === 0) {
+      return res.status(201).json({
+        message: "Dish already exists for this restaurant and category",
+      });
+    }
+
+    res.status(201).json({ message: "Dish added successfully" });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.post("/remove_dish", async (req, res) => {
+  const { restaurant_name, category_name, dish_name } = req.body;
+  if (!restaurant_name || !category_name || !dish_name)
+    return res.status(400).json({ error: "Missing required fields" });
+
+  try {
+    // Find restaurant_id, category_id, and menu_item_id
+    const query = `
+      SELECT r.id AS restaurant_id, c.id AS category_id, mi.id AS menu_item_id
+      FROM restaurants r
+      JOIN categories c ON c.name ILIKE $2
+      JOIN menu_items mi ON mi.name ILIKE $3
+      JOIN restaurant_category_dish rcd 
+        ON rcd.restaurant_id = r.id 
+        AND rcd.category_id = c.id 
+        AND rcd.menu_item_id = mi.id
+      WHERE r.name ILIKE $1
+    `;
+    const result = await pool.query(query, [
+      restaurant_name,
+      category_name,
+      dish_name,
+    ]);
+
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Dish not found in this restaurant and category" });
+    }
+
+    const { restaurant_id, category_id, menu_item_id } = result.rows[0];
+
+    // Delete dish from restaurant_category_dish
+    await pool.query(
+      `DELETE FROM restaurant_category_dish
+       WHERE restaurant_id = $1 AND category_id = $2 AND menu_item_id = $3`,
+      [restaurant_id, category_id, menu_item_id]
+    );
+
+    // Check if the dish still exists in restaurant_category_dish
+    const checkDish = await pool.query(
+      "SELECT 1 FROM restaurant_category_dish WHERE menu_item_id = $1 LIMIT 1",
+      [menu_item_id]
+    );
+
+    if (checkDish.rows.length === 0) {
+      // Delete from menu_items if no references exist
+      await pool.query("DELETE FROM menu_items WHERE id = $1", [menu_item_id]);
+    }
+
+    res.status(200).json({ message: "Dish removed successfully" });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 const storeOtp = async (phoneNumber, otp) => {
