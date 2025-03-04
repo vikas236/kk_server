@@ -3,11 +3,15 @@ import pkg from "pg";
 const { Client, Pool } = pkg;
 import dotenv from "dotenv";
 import cors from "cors";
+import bodyParser from "body-parser";
 
 const app = express();
 const port = 3000;
 dotenv.config();
 app.use(express.json());
+// Increase limit (default is 100kb)
+app.use(bodyParser.json({ limit: "50mb" }));
+app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 
 // Use Pool instead of Client for better connection management
 const pool = new Pool({
@@ -28,6 +32,24 @@ app.use(cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("Welcome to my server!");
+});
+
+app.post("/get_table", async (req, res) => {
+  try {
+    const { table_name } = req.body;
+
+    if (!table_name) {
+      return res.status(400).json({ message: "Table name is required" });
+    }
+
+    const query = `SELECT * FROM ${table_name}`;
+    const result = await pool.query(query);
+
+    res.status(201).json(result.rows);
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).json({ message: "Error getting table contents" });
+  }
 });
 
 app.get("/restaurants", async (req, res) => {
@@ -447,6 +469,113 @@ app.post("/add_dishimage", async (req, res) => {
     console.error("Error: ", err);
     res.status(500).send({ message: "Error updating image" });
   }
+});
+
+app.post("/remove_dishimage", async (req, res) => {
+  const { restaurant_name, category_name, dish_name } = req.body;
+
+  try {
+    // Query to find the correct row in restaurant_category_dish
+    const dishQuery = `
+      SELECT rcd.restaurant_id, rcd.category_id, rcd.menu_item_id
+      FROM restaurant_category_dish rcd
+      JOIN restaurants r ON rcd.restaurant_id = r.id
+      JOIN categories c ON rcd.category_id = c.id
+      JOIN menu_items mi ON rcd.menu_item_id = mi.id
+      WHERE r.name ~* $1 
+        AND c.name ~* $2 
+        AND mi.name ~* $3;
+    `;
+
+    const dishResult = await pool.query(dishQuery, [
+      restaurant_name,
+      category_name,
+      dish_name,
+    ]);
+
+    // If no matching row is found
+    if (dishResult.rows.length === 0) {
+      return res.status(404).json({ message: "No matching dish found" });
+    }
+
+    // Extract the restaurant_id, category_id, and menu_item_id
+    const { restaurant_id, category_id, menu_item_id } = dishResult.rows[0];
+
+    // Update query to remove the image (set it to NULL)
+    const updateQuery = `
+      UPDATE restaurant_category_dish
+      SET image = NULL
+      WHERE restaurant_id = $1 AND category_id = $2 AND menu_item_id = $3
+      RETURNING *;
+    `;
+
+    await pool.query(updateQuery, [restaurant_id, category_id, menu_item_id]);
+
+    res.json({ message: "Image removed successfully" });
+  } catch (err) {
+    console.error("Error: ", err);
+    res.status(500).send({ message: "Error removing image" });
+  }
+});
+
+app.post("/update_dishprice", async (req, res) => {
+  const { restaurant_name, category_name, dish_name, new_price } = req.body;
+
+  try {
+    // Query to find the correct row in restaurant_category_dish
+    const dishQuery = `
+      SELECT rcd.restaurant_id, rcd.category_id, rcd.menu_item_id
+      FROM restaurant_category_dish rcd
+      JOIN restaurants r ON rcd.restaurant_id = r.id
+      JOIN categories c ON rcd.category_id = c.id
+      JOIN menu_items mi ON rcd.menu_item_id = mi.id
+      WHERE r.name ~* $1 
+        AND c.name ~* $2 
+        AND mi.name ~* $3;
+    `;
+
+    const dishResult = await pool.query(dishQuery, [
+      restaurant_name,
+      category_name,
+      dish_name,
+    ]);
+
+    // If no matching row is found
+    if (dishResult.rows.length === 0) {
+      return res.status(404).json({ message: "No matching dish found" });
+    }
+
+    // Extract the restaurant_id, category_id, and menu_item_id
+    const { restaurant_id, category_id, menu_item_id } = dishResult.rows[0];
+
+    // Update query to change the price
+    const updateQuery = `
+      UPDATE restaurant_category_dish
+      SET price = $4
+      WHERE restaurant_id = $1 AND category_id = $2 AND menu_item_id = $3
+      RETURNING *;
+    `;
+
+    const updateResult = await pool.query(updateQuery, [
+      restaurant_id,
+      category_id,
+      menu_item_id,
+      new_price,
+    ]);
+
+    res.json({
+      message: "Price updated successfully",
+      updatedDish: updateResult.rows[0],
+    });
+  } catch (err) {
+    console.error("Error: ", err);
+    res.status(500).send({ message: "Error updating price" });
+  }
+});
+
+app.post("/add_newdish", (req, res) => {
+  console.log("Received parameters:", req.body);
+  res.status(200).send("Empty POST request received");
 });
 
 const storeOtp = async (phoneNumber, otp) => {
