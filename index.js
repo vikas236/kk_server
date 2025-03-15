@@ -748,14 +748,10 @@ app.post("/get_user_orders", async (req, res) => {
   try {
     const { phone } = req.body;
 
-    // Validate phone number
-    if (!phone) {
-      return res.status(400).json({ error: "Phone number is required!" });
-    }
-
     // Fetch orders with the given phone number (oldest first)
     const query = `SELECT * FROM kk_orders WHERE phone = $1 ORDER BY created_at DESC;`;
     const result = await pool.query(query, [phone]);
+    console.log(result.rows);
 
     res.status(200).json({ orders: result.rows });
   } catch (error) {
