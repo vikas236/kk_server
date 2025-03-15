@@ -691,6 +691,177 @@ app.post("/remove_dish", async (req, res) => {
   }
 });
 
+app.post("/add_new_order", async (req, res) => {
+  try {
+    const {
+      name,
+      restaurant_name,
+      food_order_items,
+      phone,
+      address,
+      location_url,
+      total_amount,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !name ||
+      !restaurant_name ||
+      !food_order_items ||
+      !phone ||
+      !address ||
+      !location_url ||
+      !total_amount
+    ) {
+      return res.status(400).json({ error: "All fields are required!" });
+    }
+
+    // Insert into database
+    const query = `
+      INSERT INTO kk_orders (name, restaurant_name, food_order_items, phone, address, location_url, total_amount)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *;
+    `;
+
+    const values = [
+      name,
+      restaurant_name,
+      food_order_items,
+      phone,
+      address,
+      location_url,
+      total_amount,
+    ];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      message: "Order placed successfully!",
+      order: result.rows[0], // Return the created order
+    });
+  } catch (error) {
+    console.error("❌ Error adding order:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/get_user_orders", async (req, res) => {
+  try {
+    const { phone } = req.body;
+
+    // Validate phone number
+    if (!phone) {
+      return res.status(400).json({ error: "Phone number is required!" });
+    }
+
+    // Fetch orders with the given phone number (oldest first)
+    const query = `SELECT * FROM kk_orders WHERE phone = $1 ORDER BY created_at DESC;`;
+    const result = await pool.query(query, [phone]);
+
+    res.status(200).json({ orders: result.rows });
+  } catch (error) {
+    console.error("Error fetching orders:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/get_orders_by_date", async (req, res) => {
+  try {
+    const { date } = req.body;
+
+    // Validate required field
+    if (!date) {
+      return res.status(400).json({ error: "Date is required!" });
+    }
+
+    // Fetch orders for the given date
+    const query = `
+      SELECT * FROM kk_orders
+      WHERE DATE(created_at) = $1
+      ORDER BY created_at ASC;
+    `;
+
+    const result = await pool.query(query, [date]);
+
+    res.status(200).json({ orders: result.rows });
+  } catch (error) {
+    console.error("Error fetching orders by date:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/update_order_status", async (req, res) => {
+  try {
+    const {
+      id,
+      name,
+      restaurant_name,
+      food_order_items,
+      phone,
+      address,
+      location_url,
+      total_amount,
+      order_status, // New field for updating status
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !id ||
+      !name ||
+      !restaurant_name ||
+      !food_order_items ||
+      !phone ||
+      !address ||
+      !location_url ||
+      !total_amount ||
+      !order_status
+    ) {
+      return res.status(400).json({ error: "All fields are required!" });
+    }
+
+    // Update order status where all other fields match
+    const query = `
+      UPDATE kk_orders 
+      SET order_status = $9
+      WHERE id = $1 
+      AND name = $2 
+      AND restaurant_name = $3 
+      AND food_order_items = $4 
+      AND phone = $5 
+      AND address = $6 
+      AND location_url = $7 
+      AND total_amount = $8 
+      RETURNING *;
+    `;
+
+    const values = [
+      id,
+      name,
+      restaurant_name,
+      food_order_items,
+      phone,
+      address,
+      location_url,
+      total_amount,
+      order_status,
+    ];
+
+    const result = await pool.query(query, values);
+    console.log(result);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Order not found!" });
+    }
+
+    res.status(200).json({
+      message: "Order status updated successfully!",
+      updatedOrder: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Error updating order status:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 const storeOtp = async (phoneNumber, otp) => {
   try {
     await pool.query(
